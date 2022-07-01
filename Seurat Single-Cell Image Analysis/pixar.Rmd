@@ -1,5 +1,5 @@
 ---
-title: "PixaR_TSNE"
+title: "pixaR Clustering"
 output: 
   html_document:
     toc: TRUE
@@ -569,9 +569,6 @@ pics2 <- colnames(clus2)
 
 clus0 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 0)
 pics0 <- colnames(clus0)
-
-clus8 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 8)
-pics8 <- colnames(clus8)
 
 knitr::include_graphics("./movies/clus_rest.png")
 
