@@ -224,7 +224,7 @@ colnames(movs_agg) <- c("Movie","RGB","Freq","R","G","B","Colour")
 
 ```
 
-```{r ColourBar, echo=F, fig.align='center',fig.width=14, fig.height=22}
+```{r ColourBar, echo=F, fig.align='center',fig.width=21, fig.height=33}
 temp <- movs_agg[movs_agg$Movie=="cars",]
 temp <- temp[temp$R > 85 | temp$G > 85 | temp$B > 85,]
 temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreasing = T),]$Colour))
@@ -367,7 +367,7 @@ We can see that we have a fairy extreme batch effect. This might present us with
 ```{r Normalize}
 movs_seurat <- NormalizeData(movs_seurat)
 
-t(as.data.frame(movs_seurat@assays$RNA@data)[c(35:40),c(1:5)]) %>% kable(booktabs = T, align = rep("c",10)) %>% 
+t(as.data.frame(movs_seurat@assays$RNA@data)[c(1:5),c(1:5)]) %>% kable(booktabs = T, align = rep("c",10)) %>% 
   kable_styling(position = "center")
 ```
 
@@ -389,7 +389,7 @@ plot1 <- VariableFeaturePlot(movs_seurat) +
 plot2 <- LabelPoints(plot = plot1, points = top1, repel = TRUE) + 
   theme(legend.position="none")
 
-plot1+plot2
+plot2
 
 variance.data <- as_tibble(HVFInfo(movs_seurat),rownames = "Feature")
 
@@ -399,7 +399,7 @@ variance.data <- variance.data %>%
 
 ```
 
-Well, 2000 features probably isn't terrible, but ultimately we may decide to increase this number dramatically if we think it will allow our unsupervised clustering algorithm access to important information. The most variable colour was <span style="color: #334488;">**(153, 170, 221)**</span> . This is actually from the pixar logo background, which is slightly differently coloured in the other films, as such, we have one screen that is almost entirely skyblue and the colour is otherwise used very rarely, sounds pretty variable to me! 
+Well, 2000 features probably isn't terrible, but ultimately we may decide to increase this number dramatically if we think it will allow our unsupervised clustering algorithm access to important information. The most variable colour was <span style="color: #334488;">**(153, 170, 221)**</span> . This is actually from the pixar logo background in Up, which is slightly differently coloured in the other films, as such, we have one screen throughout the films that is almost entirely skyblue and the colour is otherwise used very rarely, sounds pretty variable to me! 
 
 Interestingly, the least variable colour is <span style="color: #3344cc;">**(51, 68, 204)**</span>, also blue. Mostly, when this colour is used, it is used in very very low quantites, maybe only 10 pixels out of 14,000 pixels, not a popular choice for the animators! 
 
@@ -541,8 +541,6 @@ knitr::include_graphics("./movies/clus4_dark_n_green.png")
 ```
 
 Great! Our unsupervised algorithm seems very effective at identifying images that share a colour theme. Ideally, we'd have many hundreds of images and would be able to perform a far less aggressive downsampling and colour averaging. Our algorithm is, as designed, shown information pertaining to colour ratios, and with a greatly increased feature depth would very likely be able to form much more detailed clusters.
-
-<br><br>
 
 Let's try cluster 0:
 
