@@ -554,7 +554,7 @@ knitr::include_graphics("./movies/clus0.png")
 
 Let's look at the remaining clusters:
 
-```{r clusterVis4, echo=F, fig.align='center'}
+```{r clusterVis5, echo=F, fig.align='center'}
 clus6 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 6)
 pics6 <- colnames(clus6)
 
@@ -572,10 +572,6 @@ pics0 <- colnames(clus0)
 
 clus8 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 8)
 pics8 <- colnames(clus8)
-
-movs_seurat@meta.data$RNA_snn_res.0.34
-
-pics
 
 knitr::include_graphics("./movies/clus_rest.png")
 
