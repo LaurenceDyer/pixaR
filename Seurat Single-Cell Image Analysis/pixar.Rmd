@@ -45,6 +45,8 @@ The Pixar movies we will be using are, as follows, and include all the large sca
 
 We will be using the following python script to extract our images from the collected movie files. We will also take a peak at some sample thumbnails that we will be analysing:
 
+The code for this analysis is available at: https://github.com/LaurenceDyer/pixaR
+
 ```{rPython1, eval=FALSE}
 cam = cv2.VideoCapture("C:/Users/laure/Desktop/python/Movies/MonstersInc/monstersinc.mp4")
 
@@ -222,14 +224,14 @@ colnames(movs_agg) <- c("Movie","RGB","Freq","R","G","B","Colour")
 
 ```
 
-```{r ColourBar, echo=F, fig.align='center'}
+```{r ColourBar, echo=F, fig.align='center',fig.width=14, fig.height=22}
 temp <- movs_agg[movs_agg$Movie=="cars",]
 temp <- temp[temp$R > 85 | temp$G > 85 | temp$B > 85,]
 temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreasing = T),]$Colour))
 col_col <- temp$Colour
 names(col_col) <- temp$Colour
 g_cars <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
-                  geom_bar(stat="identity") +
+                  geom_bar(stat="identity", width = 1) +
                  scale_fill_identity(guide = "legend") +
                  theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("Cars")
 
@@ -239,7 +241,7 @@ temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreas
 col_col <- temp$Colour
 names(col_col) <- temp$Colour
 g_fnemo <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
-                 geom_bar(stat="identity") +
+                 geom_bar(stat="identity", width = 1) +
                  scale_fill_identity(guide = "legend") +
                  theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("Finding Nemo")
 
@@ -249,17 +251,17 @@ temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreas
 col_col <- temp$Colour
 names(col_col) <- temp$Colour
 g_ti <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
-                 geom_bar(stat="identity") +
+                 geom_bar(stat="identity", width = 1) +
                  scale_fill_identity(guide = "legend") +
                  theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("The Incredibles")
 
-temp <- movs_agg[movs_agg$Movie=="mi",]
+temp <- movs_agg[movs_agg$Movie=="monsters",]
 temp <- temp[temp$R > 85 | temp$G > 85 | temp$B > 85,]
 temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreasing = T),]$Colour))
 col_col <- temp$Colour
 names(col_col) <- temp$Colour
 g_mi <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
-                 geom_bar(stat="identity") +
+                 geom_bar(stat="identity", width = 1) +
                  scale_fill_identity(guide = "legend") +
                  theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("Monsters Inc.")
 
@@ -269,7 +271,7 @@ temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreas
 col_col <- temp$Colour
 names(col_col) <- temp$Colour
 g_walle <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
-                 geom_bar(stat="identity") +
+                 geom_bar(stat="identity", width = 1) +
                  scale_fill_identity(guide = "legend") +
                  theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("Wall-E")
 
@@ -279,13 +281,13 @@ temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreas
 col_col <- temp$Colour
 names(col_col) <- temp$Colour
 g_up <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
-                 geom_bar(stat="identity") +
+                 geom_bar(stat="identity", width = 1) +
                  scale_fill_identity(guide = "legend") +
                  theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("Up")
 
 
 
-grid.arrange(g_cars,g_fnemo,g_mi,g_ti,g_up,g_walle, ncol=3)
+grid.arrange(g_cars,g_fnemo,g_mi,g_ti,g_up,g_walle, ncol=2)
 
 
 
@@ -542,6 +544,14 @@ Great! Our unsupervised algorithm seems very effective at identifying images tha
 
 <br><br>
 
+Let's try cluster 0:
+
+```{r Cluster0, echo=F, fig.align='center'}
+
+knitr::include_graphics("./movies/clus0.png")
+
+```
+
 Let's look at the remaining clusters:
 
 ```{r clusterVis4, echo=F, fig.align='center'}
@@ -556,6 +566,16 @@ pics1 <- colnames(clus1)
 
 clus2 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 2)
 pics2 <- colnames(clus2)
+
+clus0 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 0)
+pics0 <- colnames(clus0)
+
+clus8 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 8)
+pics8 <- colnames(clus8)
+
+movs_seurat@meta.data$RNA_snn_res.0.34
+
+pics
 
 knitr::include_graphics("./movies/clus_rest.png")
 
