@@ -1,0 +1,566 @@
+---
+title: "PixaR_TSNE"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+    theme: paper
+---
+
+```{r import, include=F}
+
+require(data.table)
+require(readr)
+require(reshape2)
+require(Seurat)
+require(dplyr)
+require(knitr)
+require(grDevices)
+require(ggplot2)
+require(gridExtra)
+require(grid)
+require(plotly)
+require(kableExtra)
+
+```
+
+# 1. About Dataset
+
+Pixar, a Disney subsidiary, is a popular maker of animated cartoon movies for children known for their critically acclaimed and always colourful feature-length pictures. In this data analysis, we will be taking several thousand images, one taken each 10 seconds, from 5 famous Pixar films, calculating colour values for each pixel within each image and analysing these for visual similarity.
+
+Most of this project will be performed in python with some R work for visualization.
+
+The motivation for this project is to employ unsupervised machine learning clustering algorithms to this set of images, employing both the TSNE and UMAP algorithms, as well as a classic PCA, and analyse the resulting dataset. Part of this project is inspired by the use of single-cell RNA-Sequencing technologies. We aim to model each image as an individual cell, with each colour representing a gene, with the total number of coloured pixels in each image being considered the level of transcription of said gene. This will also provide us a framework with which to normalize each movie, as they contain different resolutions and thus a different potential depth of pixels.
+
+Each movie's image information is initially in an RGB format with 256^3 possible combinations. We aim to limit our dataset to 4096 (16^3, where 16 is also a factor of 256) individual colours so as to create a usable feature set, and will use the euclidean distance between the observed colours and our colourset to group colours into our set.
+
+The Pixar movies we will be using are, as follows, and include all the large scale productions from the years 2000-2009, excluding Ratatouille, as I could not locate a DVD copy.
+
+* Up
+* Wall-E
+* The Incredibles
+* Cars
+* Finding Nemo
+* Monsters Inc.
+
+We will be using the following python script to extract our images from the collected movie files. We will also take a peak at some sample thumbnails that we will be analysing:
+
+```{rPython1, eval=FALSE}
+cam = cv2.VideoCapture("C:/Users/laure/Desktop/python/Movies/MonstersInc/monstersinc.mp4")
+
+try:
+    if not os.path.exists('Image/monsters'):
+        os.makedirs('Image/monsters')
+
+except OSError:
+    print('Error: Creating directory for images')
+
+intvl = 10 #interval in second(s)
+
+fps= int(cam.get(cv2.CAP_PROP_FPS))
+print("fps : " ,fps)
+
+currentframe = 0
+while (True):
+    ret, frame = cam.read()
+    if ret:
+        if(currentframe % (fps*intvl) == 0):
+            name = './Image/monsters/monsters' + str(currentframe) + '.jpg'
+            print('Creating...' + name)
+            cv2.imwrite(name, frame)
+        currentframe += 1
+    else:
+        break
+
+cam.release()
+cv2.destroyAllWindows()
+```
+
+```{r, fig.align="center", out.extra='style="max-width:none; width:75vw; margin-left:calc(50% - 38vw);"', fig.width = 120, fig.height = 62,echo=FALSE}
+knitr::include_graphics("./movies/screencap_code.png")
+```
+
+Potential problems with film resolution are clearly visible from the get-go.
+
+# 2. Image Processing
+
+In order to have any chance of processing our images before the heat death of the Universe, we must downsample each image using the python module cv2's pyramid-down function, creating RGB averages in the process. We then use the cKDTree from SciPy to quickly ("quickly") find the nearest neighbour to each observed pixel colour from our colour set of 4096 colours. This is performed using python code, viewable on github.
+
+The output of this code is a large numpy array, saved as a csv, with roughly 10 million rows, with each row containing a single pixel's RGB code and the name of the image it originated from - Similar(ish) to a tagged sequencing run.
+
+```{rPython2, eval=FALSE, echo=F}
+r = list(range(0,256,17))	
+g = list(range(0,256,17))
+b = list(range(0,256,17))
+
+rgb_ref = list(itertools.product(r,g,b))
+
+def nearest_colour(rgb_list):
+	r, g, b = rgb_list
+	distances = []
+	for color in rgb_ref:
+		r_ref, g_ref, b_ref = color
+		dist = sqrt((r - r_ref)**2 + (g - g_ref)**2 + (b - b_ref)**2)
+		distances.append((dist, color))
+	return min(distances)[1]
+
+def block_mean(ar, fact):
+    assert isinstance(fact, int), type(fact)
+    sx, sy = ar.shape
+    X, Y = np.ogrid[0:sx, 0:sy]
+    regions = sy/fact * (X/fact) + Y/fact
+    res = ndimage.mean(ar, labels=regions, index=np.arange(regions.max() + 1))
+    res.shape = (sx/fact, sy/fact)
+    return res
+
+
+direct = os.listdir("./Image/mov")
+
+print(len(direct))
+
+mov_images = pd.DataFrame()
+
+for img in tqdm(direct):
+
+	img_a = Image.open("./Image/mov/"+str(img))
+	img_a = np.asarray(img_a)
+	img_a = cv2.pyrDown(cv2.pyrDown(cv2.pyrDown(img_a)))
+	
+	h,w,bpp = np.shape(img_a)
+	
+	for py in range(0,h):
+	    for px in range(0,w):
+	      ########################
+	      #Used this part to find nearest color 
+	      #reference : https://stackoverflow.com/a/22478139/9799700
+	      input_color = (img_a[py][px][0],img_a[py][px][1],img_a[py][px][2])
+	      tree = sp.cKDTree(rgb_ref) 
+	      ditsance, result = tree.query(input_color) 
+	      nearest_color = rgb_ref[result]
+	      ###################
+	      
+	      img_a[py][px][0]=nearest_color[0]
+	      img_a[py][px][1]=nearest_color[1]
+	      img_a[py][px][2]=nearest_color[2]
+	
+	img_a = img_a.reshape(10720,3)
+
+	img_p = pd.DataFrame(img_a, columns = ['R','G','B'])
+
+	img_p["RGB"] = "("+img_p["R"].astype(str)+", "+img_p["G"].astype(str)+", "+img_p["B"].astype(str)+")"
+
+	img_p = img_p.drop(["R","G","B"], axis=1)	
+
+	img_p["Name"] = str(img)
+
+	mov_images = mov_images.append(img_p)	
+	
+mov_images.to_csv("mov.csv", sep=';', encoding='utf-8', index =False)
+```
+
+We then take this data and input it into R via readr (As it is very large) and use the surprisingly efficient reshape2's dcast function to transform each movie's data into a matrix of image names vs pixel colours, with each cell containing an integer value for the number of times that pixel was observed in each image.
+
+```{r load, include=F}
+
+setwd("C:/Users/laure/Desktop/python/Movies/")
+load("movs.RData")
+
+```
+
+```{r dcast, eval=F}
+
+fnemo <- readr::read_delim("fnemo.csv", delim = ";") 
+ti <- readr::read_delim("ti.csv", delim = ";") 
+walle <- readr::read_delim("walle.csv", delim = ";") 
+up <- readr::read_delim("up.csv", delim = ";") 
+mi <- readr::read_delim("mi.csv", delim = ";") 
+cars <- readr::read_delim("cars.csv", delim = ";") 
+
+movs <- rbindlist(list(fnemo,ti,walle))
+
+movs_d <- dcast(formula = Name~RGB, data = movs)
+
+```
+```{r head, echo=F}
+
+movs_d$Name <- gsub("\\.jpg","",movs_d$Name)
+colnames(movs_d) <- gsub("\\(","",colnames(movs_d))
+colnames(movs_d) <- gsub("\\)","",colnames(movs_d))
+colnames(movs_d) <- gsub(", ","_",colnames(movs_d))
+
+movs_d[c(35:40),c(1:5)] %>% kable(booktabs = T, align = rep("c",10)) %>% 
+  kable_styling(position = "center")
+
+```
+We can see that we have, as described, our data.table. The first row/column, 14400 pixels of (0,0,0) is the opening image of the film, completely black. Surprisingly, that is roughly all of the data pre-processing steps complete and the data is essentially ready to be fed into seurat, our chosen scRNA-Seq analysis platform.
+
+Before we finish processing our data, let's take quick look at the overall pixel-by-pixel colour profile of each film.
+
+For this, we'll remove colours that are too close to black - A lot of the films are veryactually very dark when averaging over pixels, a common problem in image analysis using RGB values.
+
+```{r ColourProfile, echo=F}
+
+movs_d2 <- movs_d
+movs_d2$Name <- gsub("[0-9]+","",movs_d2$Name)
+
+movs_agg <- aggregate(.~Name,movs_d2,sum)
+movs_agg <- melt(movs_agg)
+
+movs_agg <- movs_agg[!movs_agg$value==0,]
+
+movs_agg$r <- as.integer(gsub("_.*","",movs_agg$variable))
+movs_agg$g <- as.integer(gsub("_.*","",gsub(".*_","",movs_agg$variable)))
+movs_agg$b <- as.integer(gsub(".*_.*_","",movs_agg$variable))
+
+movs_agg$col <- NA
+
+for(i in c(1:length(movs_agg$r))){
+    movs_agg[i,]$col <- rgb(r=movs_agg[i,]$r,g=movs_agg[i,]$g,b=movs_agg[i,]$b, maxColorValue = 255)
+}
+
+colnames(movs_agg) <- c("Movie","RGB","Freq","R","G","B","Colour")
+
+```
+
+```{r ColourBar, echo=F, fig.align='center'}
+temp <- movs_agg[movs_agg$Movie=="cars",]
+temp <- temp[temp$R > 85 | temp$G > 85 | temp$B > 85,]
+temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreasing = T),]$Colour))
+col_col <- temp$Colour
+names(col_col) <- temp$Colour
+g_cars <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
+                  geom_bar(stat="identity") +
+                 scale_fill_identity(guide = "legend") +
+                 theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("Cars")
+
+temp <- movs_agg[movs_agg$Movie=="fnemo",]
+temp <- temp[temp$R > 85 | temp$G > 85 | temp$B > 85,]
+temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreasing = T),]$Colour))
+col_col <- temp$Colour
+names(col_col) <- temp$Colour
+g_fnemo <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
+                 geom_bar(stat="identity") +
+                 scale_fill_identity(guide = "legend") +
+                 theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("Finding Nemo")
+
+temp <- movs_agg[movs_agg$Movie=="ti",]
+temp <- temp[temp$R > 85 | temp$G > 85 | temp$B > 85,]
+temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreasing = T),]$Colour))
+col_col <- temp$Colour
+names(col_col) <- temp$Colour
+g_ti <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
+                 geom_bar(stat="identity") +
+                 scale_fill_identity(guide = "legend") +
+                 theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("The Incredibles")
+
+temp <- movs_agg[movs_agg$Movie=="mi",]
+temp <- temp[temp$R > 85 | temp$G > 85 | temp$B > 85,]
+temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreasing = T),]$Colour))
+col_col <- temp$Colour
+names(col_col) <- temp$Colour
+g_mi <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
+                 geom_bar(stat="identity") +
+                 scale_fill_identity(guide = "legend") +
+                 theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("Monsters Inc.")
+
+temp <- movs_agg[movs_agg$Movie=="walle",]
+temp <- temp[temp$R > 85 | temp$G > 85 | temp$B > 85,]
+temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreasing = T),]$Colour))
+col_col <- temp$Colour
+names(col_col) <- temp$Colour
+g_walle <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
+                 geom_bar(stat="identity") +
+                 scale_fill_identity(guide = "legend") +
+                 theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("Wall-E")
+
+temp <- movs_agg[movs_agg$Movie=="up",]
+temp <- temp[temp$R > 85 | temp$G > 85 | temp$B > 85,]
+temp$Colour <- factor(temp$Colour, levels = unique(temp[order(temp$Freq, decreasing = T),]$Colour))
+col_col <- temp$Colour
+names(col_col) <- temp$Colour
+g_up <- ggplot(temp, aes(x=Colour,y=Freq,fill=Colour)) + 
+                 geom_bar(stat="identity") +
+                 scale_fill_identity(guide = "legend") +
+                 theme(axis.text.x = element_blank(), legend.position="None") + ggtitle("Up")
+
+
+
+grid.arrange(g_cars,g_fnemo,g_mi,g_ti,g_up,g_walle, ncol=3)
+
+
+
+
+```
+
+
+
+
+# 3. Seurat
+
+Our final step before creating our Seurat object is to create a meta-data frame that will link the name of each cell to information about its origin, in this case, the movie it came from.
+
+```{r Seurat}
+movs_md <- data.frame(matrix(nrow = length(movs_d$Name)))
+
+rownames(movs_md) <- movs_d$Name
+colnames(movs_md) <- "Movie_Origin"
+
+movs_md$Movie_Origin <- gsub("[0-9].*","",rownames(movs_md))
+unique(movs_md$Movie_Origin)
+movs_md$Movie_Origin <- ifelse(movs_md$Movie_Origin == "fnemo", "Finding Nemo",
+                               ifelse(movs_md$Movie_Origin == "ti", "The Incredibles",
+                                      ifelse(movs_md$Movie_Origin == "walle", "Wall-E",
+                                             ifelse(movs_md$Movie_Origin == "monsters", "Monsters Inc.",
+                                                    ifelse(movs_md$Movie_Origin == "cars", "Cars",
+                                                           ifelse(movs_md$Movie_Origin == "up", "Up",NA))))))
+
+movs_df <- as.data.frame(movs_d)
+rownames(movs_df) <- movs_d$Name
+movs_df <- movs_df[,-1]
+
+movs_seurat <- CreateSeuratObject(counts = t(movs_df), project = "Pixar", assay = "RNA", min.cells = 0, min.features = 0)
+movs_seurat <- AddMetaData(movs_seurat,metadata = movs_md) 
+
+```
+
+
+<div style="width: 100%;">
+<div style="width: 50%; float: left;">
+
+```{r VlnPlot, fig.align='center', fig.height=5, fig.width=5,echo=F}
+
+VlnPlot(movs_seurat, features = c("nFeature_RNA"), ncol = 1) + ggtitle("Number of Colours per image") +
+  theme(legend.position = "None")
+
+```
+</div>
+<div style="width: 50%; float: right;">
+<hr style="height:50    pt; visibility:hidden;">
+<br>
+```{r ti_image, echo=F}
+
+knitr::include_graphics("./movies/walle59570.jpg")
+
+```
+</div>
+</div>
+
+Great! Our data is faithfully represented by Seurat. Here we see a quick plot indicating how many features (colours) are present in each image. We see that most images contain around 125 individual colours, but some contain just one and one image from Wall-E contains roughly 1200 unique colours. That's a lot of colours!
+
+
+<br><br><br><br>
+
+
+
+And now we can take a quick look at our resolution problem in a little more detail:
+
+```{r FeatureCount, echo=FALSE, fig.align='center'}
+
+FeatureScatter(movs_seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", group.by = "Movie_Origin", jitter = TRUE)
+
+```
+
+We can see that we have a fairy extreme batch effect. This might present us with problems later and we may have to implement a batch correction algorithm. For now, let's assume that Seurat's baseline normalization will be robust enough to handle the consistent difference in feature depth between movies.
+
+```{r Normalize}
+movs_seurat <- NormalizeData(movs_seurat)
+
+t(as.data.frame(movs_seurat@assays$RNA@data)[c(35:40),c(1:5)]) %>% kable(booktabs = T, align = rep("c",10)) %>% 
+  kable_styling(position = "center")
+```
+
+Here we can see that our normalization process has turned each set of counts into doubles, rather than integers. Hopefully this process has accounted for the different number of pixels derived from each image.
+
+Now we get to the slightly more abstract part. We really care the most about colours that vary a lot between each image. If all the images contain a similar amount of a colour, then it is not very informative for us. In our first major departure from typical scRNA-Seq processing, I expect we will need to keep a much, much greater proportion of features than normal. This is because, typically, cells express extremely similar amounts of "housekeeping" genes, which maintain functions that all cells will perform at equal rates and contain very little feature variation.
+
+In our case, there are unlikely to be many housekeeping colours, and we expect the colour profile of each image to vary wildly, leaving us with an accordingly large feature space.
+
+```{r Variable Genes, fig.align='center', echo=F}
+
+movs_seurat <- FindVariableFeatures(object = movs_seurat, mean.function = ExpMean, dispersion.function = LogVMR,
+                                    selection.method = "vst", nfeatures = 2000)
+
+top1 <- head(VariableFeatures(movs_seurat), 1)
+
+plot1 <- VariableFeaturePlot(movs_seurat) + 
+  theme(legend.position="top")
+plot2 <- LabelPoints(plot = plot1, points = top1, repel = TRUE) + 
+  theme(legend.position="none")
+
+plot1+plot2
+
+variance.data <- as_tibble(HVFInfo(movs_seurat),rownames = "Feature")
+
+variance.data <- variance.data %>% 
+  mutate(hypervariable=Feature %in% VariableFeatures(movs_seurat))
+
+
+```
+
+Well, 2000 features probably isn't terrible, but ultimately we may decide to increase this number dramatically if we think it will allow our unsupervised clustering algorithm access to important information. The most variable colour was <span style="color: #334488;">**(153, 170, 221)**</span> . This is actually from the pixar logo background, which is slightly differently coloured in the other films, as such, we have one screen that is almost entirely skyblue and the colour is otherwise used very rarely, sounds pretty variable to me! 
+
+Interestingly, the least variable colour is <span style="color: #3344cc;">**(51, 68, 204)**</span>, also blue. Mostly, when this colour is used, it is used in very very low quantites, maybe only 10 pixels out of 14,000 pixels, not a popular choice for the animators! 
+
+Now, we simply scale our data such that each feature has a mean of 0 and a variance of 1, which ought to make our analysis less biased towards frequently used colours.
+
+```{r Scale, echo=F}
+
+movs_seurat <- ScaleData(movs_seurat,features=rownames(movs_seurat))
+
+```
+# 4. Dimensionality reduction
+
+Now that our data is scaled, normalised and our variable features are selected, we can begin with our dimensionality reduction. We will begin with the coca-cola of dimensionality reduction algorithms, the PCA. This is very easily implemented using Seurat.
+
+## PCA
+
+```{r PCA, fig.align='center', include=F}
+
+movs_seurat <- RunPCA(movs_seurat, features = VariableFeatures(movs_seurat))
+
+```
+```{r PCA2, echo = F, fig.align='center'}
+
+DimPlot(movs_seurat,reduction="pca", group.by = "Movie_Origin", dims = c(1,2))
+
+```
+Uhh, well, not great! We don't see any clear clusters of particular colours, and our individual movies are largely plotted directly on top of each other. Fail! Certainly, with such high-dimensional data (~3500 dimensions), there is not enough information captured in only the first two principal components to find any meaningful underlying patterns.
+
+So how many PCs would we need to use to capture the meaningful underlying variance? Typically we use an elbow plot, where we plot the standard deviation of each PC and visually assess this graph for an "elbow" in the data. 
+
+```{r Elbow, fig.align='center'}
+
+ElbowPlot(movs_seurat, ndims = 50)
+
+```
+
+In the above example, the elbow is not as clear as it might be, but we might be able to make a reasonable choice at around 15 dimensions, though we might increase this all the way to 40 and still have usable information. Interesting.
+
+## tSNE and UMAP
+
+To attempt to capture more information from these 15+ dimensions in our 2d representation, we will run the tSNE unsupervised learning dimensionality reduction algorithm. 
+
+We have a couple of hyper-parameters to mess around with, most importantly we can change the number of incoming dimensions to reduce, according to the above elbow plot, and we can modify a quantity called the "perplexity", which can be thought of almost as a resolution for clustering. Increasing the perplexity will make clusters of images more distinct at the cost of losing smaller clusters altogether. We've been through a few of these, and the graph produced at perplexity 100 looks fairly well clustered.
+
+```{r tSNE, echo = F, fig.align='center', out.width=1280}
+
+set.seed(1337)
+
+knitr::include_graphics("./movies/test2.png")
+
+```
+Because we are performing using an unsupervised approach, there is no "correct" answer as to which of these parameter sets is the best/most accurate. Really, we are looking for the reduction with the most highly delineated clusters. Unlike normal RNA-Seq analysis, our underlying features are not likely to form large, highly interconnected correlating networks, as genes would, so clusters are harder to find than they normally might be. That said, it seems that we are able to recover some meaningful clusters using the tSNE algorithm with KNN. 
+
+We'll also perform a similar kind of optimisation for our UMAP algorithm representation, then plot the KNN clusters across both graphs and compare.
+
+```{r KNN, echo=F, message=FALSE, warning=FALSE, include=FALSE}
+movs_seurat@meta.data$name <- rownames(movs_seurat@meta.data)
+
+movs_seurat <- RunTSNE(movs_seurat,
+         dims=1:32,
+          seed.use = 1337, 
+           perplexity=100, check_duplicates = FALSE)
+
+movs_seurat <- FindNeighbors(movs_seurat, dims = 1:32)
+movs_seurat <- FindClusters(movs_seurat, resolution = 0.34)
+
+tsne <- HoverLocator(DimPlot(movs_seurat,reduction = "tsne", pt.size = 1.5) + ggtitle("tSNE"),
+                     information = FetchData(movs_seurat, vars = c("Movie_Origin","name")))
+
+```
+
+```{r UMAP, echo=F, message=FALSE, warning=FALSE, include=FALSE}
+
+movs_seurat <- RunUMAP(movs_seurat, dims = 1:40, spread = 0.75, min.dist = 0.1, a = 50, b = 1, seed.use = 1337)
+
+umap <- HoverLocator(DimPlot(movs_seurat, reduction = "umap", pt.size = 1.5) + ggtitle("UMAP"),
+                     information = FetchData(movs_seurat, vars = c("Movie_Origin","name")))
+
+```
+
+```{r Plotly, echo=F, fig.align='left',fig.width=8, warning=FALSE, message=FALSE}
+
+suppressWarnings(tsne)
+
+suppressWarnings(umap)
+
+
+```
+
+Looks like we do get some fairly clearly defined clusters, and there actually isn't a whole lot of difference between our dimensionality reduction visualisations! That's promising. We'll pick UMAP and proceed with this one going forward for simplicity.
+
+We might be interested in how well each movie clusters. We don't necessarily expect each movie to cluster individually, as they all use a wide ranging colour palette, but perhaps we will discover some similarities:
+
+```{r Clustered Images, echo=F, fig.align='center'}
+
+umap_embed <- as.data.frame(movs_seurat[["umap"]]@cell.embeddings)
+tsne_embed <- as.data.frame(movs_seurat[["tsne"]]@cell.embeddings)
+
+DimPlot(movs_seurat, reduction = "umap", group.by = "Movie_Origin", pt.size = 1.5) +
+               stat_ellipse(geom="polygon",aes(x=UMAP_1,y=UMAP_2,
+                                               group=Movie_Origin,fill=Movie_Origin), alpha=0.1)
+
+```
+
+Well, no real clustering of individual movies! Most of these films do seem to share a relatively similar colour profile. The only thing of note to really see here is tht Finding Nemo does appear to stand out the tiniest bit. Based on this, we might assume that the two clusters to the far left of the graph are likely to be blue.
+
+## Cluster Visualization
+
+Let's explore that - The real question - Does our unsupervised clustering represent a real similarity between picture themes? We'll load the most central pictures of each cluster and view them here. Our smallest cluster is the pink cluster, associated with only 62 images, so we'll start there:
+
+```{r cluster vis, echo=F, fig.align='center'}
+clus7 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 7)
+pics7 <- colnames(clus7)
+
+knitr::include_graphics("./movies/clus7_blue.png")
+
+```
+Wow! Good job, UMAP! Cluster 7 is a very clear ocean blue cluster this is, unsurprisingly, full of finding nemo picks! Let's check another cluster, cluster 5.
+
+<br><br>
+
+```{r clusterVis2, echo=F, fig.align='center'}
+clus5 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 5)
+pics5 <- colnames(clus5)
+
+knitr::include_graphics("./movies/clus5_dark_n_red.png")
+
+```
+This also looks great! A strong red-on-dark background theme here. It's worthwhile to remember that the algorithm is unaware of the overall average colour of an image, so it is interesting to see it come through so clearly. Let's do one more cluster before moving on, cluster 2.
+
+<br><br>
+
+```{r clusterVis3, echo=F, fig.align='center'}
+clus4 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 4)
+pics4 <- colnames(clus4)
+
+knitr::include_graphics("./movies/clus4_dark_n_green.png")
+
+```
+
+Great! Our unsupervised algorithm seems very effective at identifying images that share a colour theme. Ideally, we'd have many hundreds of images and would be able to perform a far less aggressive downsampling and colour averaging. Our algorithm is, as designed, shown information pertaining to colour ratios, and with a greatly increased feature depth would very likely be able to form much more detailed clusters.
+
+<br><br>
+
+Let's look at the remaining clusters:
+
+```{r clusterVis4, echo=F, fig.align='center'}
+clus6 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 6)
+pics6 <- colnames(clus6)
+
+clus3 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 3)
+pics3 <- colnames(clus3)
+
+clus1 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 1)
+pics1 <- colnames(clus1)
+
+clus2 <- subset(movs_seurat, subset = RNA_snn_res.0.34 == 2)
+pics2 <- colnames(clus2)
+
+knitr::include_graphics("./movies/clus_rest.png")
+
+```
+
+<br><br>
+
+Not too bad! Good job, UMAP. 
